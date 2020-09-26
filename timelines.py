@@ -16,14 +16,21 @@ class Interval():
         self.end = end
         self.subject = subject
         self.area = area
+        self.rowspan = 1
 
     def __str__(self):
-        return "<from %d to %d: %s (%s)>" % (self.begin, self.end, self.subject, self.area)
-        
+        return "<from %d to %d: %s (%s) rs=%d>" % (self.begin, self.end,
+                                                   self.subject, self.area,
+                                                   self.rowspan)
+
 class TimeLines():
 
     def __init__(self):
         self.columns = []
+        self.years = []         # all the years in which an interval starts
+        self.next_year = {}     # maps each element of self.years to the next one
+        self.earliest_year = 1000000
+        self.latest_year = -self.earliest_year
 
     def add_data(self, rowsource):
         for row in rowsource:
@@ -56,32 +63,84 @@ class TimeLines():
         else:
             self.columns.append([interval])
 
+    def fill_in_gaps(self):
+        """Put filler intervals in the gaps in each column."""
+        for column in self.columns:
+            if column[0].begin < self.earliest_year:
+                self.earliest_year = column[0].begin
+            if column[0].end > self.latest_year:
+                self.latest_year = column[0].end
+        # gapstring = "<!-- empty -->"
+        # gapstring = ""
+        gapstring = "[gap]"
+        for i, column in enumerate(self.columns):
+            filled_column = []
+            gap_start = self.earliest_year
+            # first filler is from earliest time to start of this column
+            for interval in column:
+                if interval.begin > gap_start:
+                    filled_column.append(Interval(gap_start+1, interval.begin-1, gapstring, ""))
+                filled_column.append(interval)
+                gap_start = interval.end
+            # last filler is from end of this column until now
+            if filled_column[-1].end < self.latest_year:
+                filled_column.append(Interval(filled_column[-1].end+1, self.latest_year, gapstring, ""))
+            self.columns[i] = filled_column
+
+    def find_start_years(self):
+        years = set()
+        for column in self.columns:
+            for interval in column:
+                years.add(interval.begin)
+        self.years = sorted(years)
+        self.next_year = {}
+        prev_year = self.earliest_year
+        for year in self.years:
+            self.next_year[prev_year] = year
+            prev_year = year
+        self.next_year[self.years[-1]] = self.latest_year
+
+    def set_rowspans(self):
+        for column in self.columns:
+            for interval in column:
+                this_year = interval.begin
+                while this_year < interval.end and this_year < self.latest_year:
+                    interval.rowspan += 1
+                    this_year = self.next_year[this_year]
+                interval.rowspan -= 1
+
+    def output_HTML(self, filename):
+        cursors = [0] * len(self.columns)
+        with open(filename, 'w') as outstream:
+            outstream.write('<html>\n  <head>\n    <title>Timelines</title>\n  </head>\n  <body>\n')
+            outstream.write('    <table border="1">\n')
+            for year in self.years:
+                outstream.write('      <tr><th>%d</th>\n' % year)
+                for i, column in enumerate(self.columns):
+                    c = cursors[i]
+                    if c >= len(column):
+                        continue
+                    cell = column[c]
+                    if cell.begin == year:
+                        outstream.write('      <td rowspan="%d" valign="top">%s' % (cell.rowspan, cell.subject))
+                        if True:
+                            outstream.write("<br>(%d -- %d)" % (cell.begin, cell.end))
+                        outstream.write('</td>\n')
+                        cursors[i] += 1
+                outstream.write('      </tr>\n')
+            outstream.write('  </table>')
+            outstream.write('  </body>\n</html>\n')
+
+    def output_SVG(self, filename):
+        with open(filename, 'w') as outstream:
+            pass                # TODO: write this
+
     def dump_raw(self):
         for colno, coldata in enumerate(self.columns):
             print("column", colno)
             for interval in coldata:
                 print("  ", interval)
 
-    def fill_in_gaps(self):
-        """Put filler intervals in the gaps in each column."""
-        earliest_year = this_year
-        for column in self.columns:
-            if column[0].begin < earliest_year:
-                earliest_year = column[0].begin
-        for column in self.columns:
-            gap_start = earliest_year
-            # first filler is from earliest time to start of this column
-            # last filler is from end of this column until now
-            pass
-
-    def output_HTML(self, filename):
-        with open(filename, 'w') as outstream:
-            pass                # TODO: write this
-    
-    def output_SVG(self, filename):
-        with open(filename, 'w') as outstream:
-            pass                # TODO: write this
-    
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("input", nargs="+",
@@ -97,12 +156,13 @@ def main():
             reader = csv.DictReader(instream)
             timelines.add_data(reader)
 
-    timelines.dump_raw()
-
     output = args.output or os.path.splitext(args.input[0])[0] + ".html"
-    
+
     if output.endswith(".html"):
         timelines.fill_in_gaps()
+        timelines.find_start_years()
+        timelines.set_rowspans()
+        # timelines.dump_raw()
         timelines.output_HTML(output)
     elif output.endswith(".svg"):
         timelines.output_SVG(output)
@@ -111,4 +171,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
