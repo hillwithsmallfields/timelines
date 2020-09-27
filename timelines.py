@@ -7,7 +7,7 @@ import os.path
 
 PREFER_LEFTMOST = True          # if false, tries to re-use the column last occupied furthest back (doesn't work yet)
 
-this_year = datetime.date.today().year
+year_chart_produced = datetime.date.today().year
 
 class Interval():
 
@@ -19,7 +19,7 @@ class Interval():
         self.rowspan = 1
 
     def __str__(self):
-        return "<from %d to %d: %s (%s) rs=%d>" % (self.begin, self.end,
+        return "<from %d to %d: %s (%s) spans %d rows>" % (self.begin, self.end,
                                                    self.subject, self.area,
                                                    self.rowspan)
 
@@ -31,6 +31,7 @@ class TimeLines():
         self.next_year = {}     # maps each element of self.years to the next one
         self.earliest_year = 1000000
         self.latest_year = -self.earliest_year
+        self.extended = False
 
     def add_data(self, rowsource):
         for row in rowsource:
@@ -41,7 +42,7 @@ class TimeLines():
             return
         begin = int(row['Begin date'])
         raw_end = row['End date']
-        end = (this_year
+        end = ((year_chart_produced if self.extended else begin)
                if raw_end == '*'
                else (begin
                      if (raw_end == '.' or raw_end == "")
@@ -55,10 +56,10 @@ class TimeLines():
         best_column = None
         for colno, coldata in enumerate(self.columns):
             latest = coldata[-1].end
-            if latest < begin and PREFER_LEFTMOST or end < earliest_end:
+            if latest < begin and (PREFER_LEFTMOST or end < earliest_end):
                 best_column = colno
                 earliest_end = end
-        if best_column:
+        if best_column is not None:
             self.columns[best_column].append(interval)
         else:
             self.columns.append([interval])
@@ -104,10 +105,11 @@ class TimeLines():
         for column in self.columns:
             for interval in column:
                 this_year = interval.begin
-                while this_year < interval.end and this_year < self.latest_year:
+                next_year = self.next_year[this_year]
+                while this_year < interval.end and this_year <= self.latest_year:
                     interval.rowspan += 1
-                    this_year = self.next_year[this_year]
-                interval.rowspan -= 1
+                    this_year = next_year
+                    next_year = self.next_year.get(this_year, self.latest_year+1)
 
     def output_HTML(self, filename):
         cursors = [0] * len(self.columns)
@@ -135,11 +137,12 @@ class TimeLines():
         with open(filename, 'w') as outstream:
             pass                # TODO: write this
 
-    def dump_raw(self):
+    def dump_raw(self, title):
+        print(title)
         for colno, coldata in enumerate(self.columns):
-            print("column", colno)
+            print("  column", colno)
             for interval in coldata:
-                print("  ", interval)
+                print("    ", interval)
 
 def main():
     parser = argparse.ArgumentParser()
@@ -147,10 +150,16 @@ def main():
                         help="""Input files (CSV)""")
     parser.add_argument("-o", "--output",
                         help="""Output file""")
+    parser.add_argument("-x", "--extended",
+                        help="""Open-ended intervals extend to now""")
+    parser.add_argument("-d", "--debug", action='store_true')
     args = parser.parse_args()
 
     timelines = TimeLines()
 
+    if args.extended:
+        timelines.extended = True
+    
     for filename in args.input:
         with open(filename) as instream:
             reader = csv.DictReader(instream)
@@ -159,10 +168,15 @@ def main():
     output = args.output or os.path.splitext(args.input[0])[0] + ".html"
 
     if output.endswith(".html"):
+        if args.debug:
+            timelines.dump_raw("As read")
         timelines.fill_in_gaps()
+        if args.debug:
+            timelines.dump_raw("With gaps filled in")
         timelines.find_start_years()
         timelines.set_rowspans()
-        # timelines.dump_raw()
+        if args.debug:
+            timelines.dump_raw("With rowspans")
         timelines.output_HTML(output)
     elif output.endswith(".svg"):
         timelines.output_SVG(output)
