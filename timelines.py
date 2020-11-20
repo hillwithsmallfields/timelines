@@ -32,6 +32,8 @@ class TimeLines():
         self.earliest_year = 1000000
         self.latest_year = -self.earliest_year
         self.extended = False
+        self.show_gaps = False
+        self.gapstring = "[gap]"
 
     def add_data(self, rowsource):
         for row in rowsource:
@@ -71,21 +73,18 @@ class TimeLines():
                 self.earliest_year = column[0].begin
             if column[0].end > self.latest_year:
                 self.latest_year = column[0].end
-        # gapstring = "<!-- empty -->"
-        # gapstring = ""
-        gapstring = "[gap]"
         for i, column in enumerate(self.columns):
             filled_column = []
             gap_start = self.earliest_year
             # first filler is from earliest time to start of this column
             for interval in column:
                 if interval.begin > gap_start:
-                    filled_column.append(Interval(gap_start+1, interval.begin-1, gapstring, ""))
+                    filled_column.append(Interval(gap_start, interval.begin-1, self.gapstring, ""))
                 filled_column.append(interval)
-                gap_start = interval.end
+                gap_start = interval.end + 1
             # last filler is from end of this column until now
             if filled_column[-1].end < self.latest_year:
-                filled_column.append(Interval(filled_column[-1].end+1, self.latest_year, gapstring, ""))
+                filled_column.append(Interval(filled_column[-1].end+1, self.latest_year, self.gapstring, ""))
             self.columns[i] = filled_column
 
     def find_start_years(self):
@@ -105,8 +104,10 @@ class TimeLines():
         for column in self.columns:
             for interval in column:
                 this_year = interval.begin
+                # the next year in which anything starts in any column:
                 next_year = self.next_year[this_year]
-                while this_year < interval.end and this_year <= self.latest_year:
+                while next_year < interval.end and this_year <= self.latest_year:
+                    print("Stretching", interval)
                     interval.rowspan += 1
                     this_year = next_year
                     next_year = self.next_year.get(this_year, self.latest_year+1)
@@ -117,20 +118,28 @@ class TimeLines():
             outstream.write('<html>\n  <head>\n    <title>Timelines</title>\n  </head>\n  <body>\n')
             outstream.write('    <table border="1">\n')
             for year in self.years:
-                outstream.write('      <tr><th>%d</th>\n' % year)
+                empty = True
                 for i, column in enumerate(self.columns):
                     c = cursors[i]
                     if c >= len(column):
                         continue
                     cell = column[c]
                     if cell.begin == year:
-                        outstream.write('      <td rowspan="%d" valign="top">%s' % (cell.rowspan, cell.subject))
-                        if True:
-                            outstream.write("<br>(%d -- %d)" % (cell.begin, cell.end))
+                        if cell.subject != self.gapstring:
+                            if empty:
+                                outstream.write('      <tr><th>%d</th>\n' % year)
+                                empty = False
+                        if self.show_gaps or cell.subject != self.gapstring:
+                            outstream.write('        <td rowspan="%d" valign="top">%s' % (cell.rowspan, cell.subject))
+                            if cell.begin == cell.end:
+                                outstream.write("<br>(%d)" % cell.begin)
+                            else:
+                                outstream.write("<br>(%d -- %d)" % (cell.begin, cell.end))
                         outstream.write('</td>\n')
                         cursors[i] += 1
-                outstream.write('      </tr>\n')
-            outstream.write('  </table>')
+                if not empty:
+                    outstream.write('      </tr>\n')
+            outstream.write('  </table>\n')
             outstream.write('  </body>\n</html>\n')
 
     def output_SVG(self, filename):
