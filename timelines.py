@@ -71,18 +71,22 @@ class TimeLines():
         for column in self.columns:
             if column[0].begin < self.earliest_year:
                 self.earliest_year = column[0].begin
-            if column[0].end > self.latest_year:
-                self.latest_year = column[0].end
+            if column[-1].end > self.latest_year:
+                self.latest_year = column[-1].end
         for i, column in enumerate(self.columns):
+            print("filling gaps in column", i)
             filled_column = []
             gap_start = self.earliest_year
             # first filler is from earliest time to start of this column
             for interval in column:
+                print("  interval", interval)
                 if interval.begin > gap_start:
+                    print("  adding gap before interval, from", gap_start, "to", interval.begin-1)
                     filled_column.append(Interval(gap_start, interval.begin-1, self.gapstring, ""))
                 filled_column.append(interval)
                 gap_start = interval.end + 1
             # last filler is from end of this column until now
+            # print("  column", i, "ends with", filled_column[-1].subject, "at", filled_column[-1].end, "and the table ends at", self.latest_year)
             if filled_column[-1].end < self.latest_year:
                 filled_column.append(Interval(filled_column[-1].end+1, self.latest_year, self.gapstring, ""))
             self.columns[i] = filled_column
@@ -92,6 +96,7 @@ class TimeLines():
         for column in self.columns:
             for interval in column:
                 years.add(interval.begin)
+                years.add(interval.end) # TODO: I think I need to do this too, but maybe it should be end-1?
         self.years = sorted(years)
         self.next_year = {}
         prev_year = self.earliest_year
@@ -101,13 +106,16 @@ class TimeLines():
         self.next_year[self.years[-1]] = self.latest_year
 
     def set_rowspans(self):
-        for column in self.columns:
+        for i, column in enumerate(self.columns):
             for interval in column:
                 this_year = interval.begin
                 # the next year in which anything starts in any column:
+
+                # TODO: this seems to be wrong; cells are getting two many rows; it might be to do with whether there are year entries for years in which something finishes but nothing starts
+                
                 next_year = self.next_year[this_year]
                 while next_year < interval.end and this_year <= self.latest_year:
-                    print("Stretching", interval)
+                    print("Stretching column", i, "interval", interval)
                     interval.rowspan += 1
                     this_year = next_year
                     next_year = self.next_year.get(this_year, self.latest_year+1)
@@ -125,16 +133,17 @@ class TimeLines():
                         continue
                     cell = column[c]
                     if cell.begin == year:
-                        if cell.subject != self.gapstring:
+                        if self.show_gaps or cell.subject != self.gapstring or c + 1 == len(column):
                             if empty:
                                 outstream.write('      <tr><th>%d</th>\n' % year)
                                 empty = False
-                        if self.show_gaps or cell.subject != self.gapstring:
                             outstream.write('        <td rowspan="%d" valign="top">%s' % (cell.rowspan, cell.subject))
                             if cell.begin == cell.end:
                                 outstream.write("<br>(%d)" % cell.begin)
                             else:
                                 outstream.write("<br>(%d -- %d)" % (cell.begin, cell.end))
+                            if True:
+                                outstream.write("<br>{%d}" % i)
                         outstream.write('</td>\n')
                         cursors[i] += 1
                 if not empty:
@@ -153,6 +162,21 @@ class TimeLines():
             for interval in coldata:
                 print("    ", interval)
 
+    def dump_by_years(self, title):
+        print(title)
+        cursors = [0] * len(self.columns)
+        for year in self.years:
+            print("  Year", year)
+            empty = True
+            for i, column in enumerate(self.columns):
+                c = cursors[i]
+                if c >= len(column):
+                    continue
+                cell = column[c]
+                if cell.begin == year:
+                    print("    column", i, "begins", cell.subject, "continuing to", cell.end)
+                    cursors[i] += 1
+                    
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("input", nargs="+",
@@ -186,6 +210,7 @@ def main():
         timelines.set_rowspans()
         if args.debug:
             timelines.dump_raw("With rowspans")
+            timelines.dump_by_years("As assembled")
         timelines.output_HTML(output)
     elif output.endswith(".svg"):
         timelines.output_SVG(output)
