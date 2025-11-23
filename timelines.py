@@ -96,14 +96,21 @@ class TimeLines():
         for column in self.columns:
             for interval in column:
                 years.add(interval.begin)
-                years.add(interval.end) # TODO: I think I need to do this too, but maybe it should be end-1?
+                # years.add(interval.end) # TODO: I think I need to do this too, but maybe it should be end-1?
         self.years = sorted(years)
+        print("action years:")
+        for y in self.years: print("  ", y)
         self.next_year = {}
         prev_year = self.earliest_year
         for year in self.years:
             self.next_year[prev_year] = year
             prev_year = year
         self.next_year[self.years[-1]] = self.latest_year
+        print("year succession:", self.next_year)
+        y = self.earliest_year
+        while y in self.next_year and y != self.next_year[y]:
+            print("  year", y, "is followed by", self.next_year[y])
+            y = self.next_year[y]
 
     def set_rowspans(self):
         for i, column in enumerate(self.columns):
@@ -112,10 +119,12 @@ class TimeLines():
                 # the next year in which anything starts in any column:
 
                 # TODO: this seems to be wrong; cells are getting two many rows; it might be to do with whether there are year entries for years in which something finishes but nothing starts
-                
+
+                # they are getting one row too many
+
                 next_year = self.next_year[this_year]
                 while next_year < interval.end and this_year <= self.latest_year:
-                    print("Stretching column", i, "interval", interval)
+                    print("Stretching column", i, "interval", interval, "this_year", this_year, "next_year", next_year)
                     interval.rowspan += 1
                     this_year = next_year
                     next_year = self.next_year.get(this_year, self.latest_year+1)
@@ -176,7 +185,7 @@ class TimeLines():
                 if cell.begin == year:
                     print("    column", i, "begins", cell.subject, "continuing to", cell.end)
                     cursors[i] += 1
-                    
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("input", nargs="+",
@@ -192,7 +201,7 @@ def main():
 
     if args.extended:
         timelines.extended = True
-    
+
     for filename in args.input:
         with open(filename) as instream:
             reader = csv.DictReader(instream)
